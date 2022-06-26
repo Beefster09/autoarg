@@ -1,21 +1,22 @@
 import argparse
 from enum import Enum
 from inspect import signature, Parameter
-from typing import Any, Callable, Dict, List, Literal, Optional, Text, Tuple, Union, MutableSet, get_origin
+from typing import Any, Callable, Dict, List, Literal, Optional, Text, Tuple, Type, Union, MutableSet, get_origin
 
 from .types import Arg
 
 
 def generate_argparser(
     func: Callable,
-    parser_kw: dict = {},
     *,
     add_help=True,
+    **parser_kw
 ) -> argparse.ArgumentParser:
     arg_groups, short_opts = _inspect_fn(func, add_help=add_help)
 
-    parser = argparse.ArgumentParser(**parser_kw)
+    parser = argparse.ArgumentParser(func.__name__, add_help=add_help, **parser_kw)
     group_parser = parser
+    postprocessors: Dict[str, Callable[[Any], Any]] = {}
 
     for group, args in arg_groups:
         if group is not None:
@@ -24,8 +25,11 @@ def generate_argparser(
             if hasattr(arg, 'auto_assign_short_opts'):
                 arg.auto_assign_short_opts(short_opts)
             arg.add_to_parser(group_parser)
+            pf = arg.postprocessor
+            if pf is not None:
+                postprocessors[arg.dest] = pf
 
-    return parser
+    return ArgumentParserWrapper(parser, postprocessors)
 
 
 def _inspect_fn(func: Callable, /, *, add_help=True):
@@ -59,6 +63,7 @@ def _inspect_fn(func: Callable, /, *, add_help=True):
 class CommandArg:
     def __init__(self, param: Parameter):
         self.fn_param = param
+
         if isinstance(param.default, Arg):
             self.arg = param.default
         elif param.default is Parameter.empty:
@@ -66,31 +71,60 @@ class CommandArg:
         else:
             self.arg = Arg(param.default)
 
+        if param.annotation is not Parameter.empty:
+            self.type = param.annotation
+        elif self.arg.default is not ...:
+            self.type = type(self.arg.default)
+        else:
+            self.type = ...
+
+        if issubclass(type(self.arg.default), Enum):
+            self.default = self.arg.default._value_
+        else:
+            self.default = self.arg.default
+
+        self.factory = self._infer_factory()
+        self.postprocessor = self._infer_postprocessor()
+
     @property
     def dest(self):
         return self.fn_param.name
 
-    @property
-    def factory(self) -> Optional[Callable[[Text], Any]]:
+    def _infer_factory(self) -> Optional[Callable[[Text], Any]]:
         if self.arg.factory:
             return self.arg.factory
-        annotation = self.fn_param.annotation
-        if annotation is Parameter.empty or annotation is str:
+
+        if self.type is ... or self.type is str:
             return None
-        elif callable(annotation):
-            # probably should also check that it can be called with a single string argument
-            return annotation
-        elif get_origin(annotation) is Tuple:
+        elif isinstance(self.type, type) and issubclass(self.type, Enum):
+            first_base = self.type.__mro__[1]
+            if not issubclass(first_base, (str, Enum)):
+                return first_base
+            else:
+                return None
+        elif get_origin(self.type) is tuple:
             # TODO
             raise NotImplementedError()
+        elif callable(self.type):
+            # probably should also check that it can be called with a single string argument
+            return self.type
+
+        raise TypeError(self.type)
+
+    def _infer_postprocessor(self) -> Optional[Callable[[Any], Any]]:
+        if self.arg.factory:
+            return None
+
+        if isinstance(self.type, type) and issubclass(self.type, Enum):
+            return self.type
         else:
-            raise TypeError(annotation)
+            return None
 
     @property
     def choices(self) -> Optional[List[str]]:
         annotation = self.fn_param.annotation
         if issubclass(annotation, Enum):
-            return [str(choice) for choice in annotation]
+            return [str(choice._value_) for choice in annotation]
 
 
 class Positional(CommandArg):
@@ -101,8 +135,8 @@ class Positional(CommandArg):
             'metavar': self.arg.metavar,
             'help': self.arg.help,
         }
-        if self.arg.default is not ...:
-            kw['default'] = self.arg.default
+        if self.default is not ...:
+            kw['default'] = self.default
         parser.add_argument(self.dest, **kw)
 
 
@@ -115,8 +149,8 @@ class VarPositional(Positional):
             'metavar': self.arg.metavar,
             'help': self.arg.help,
         }
-        if self.arg.default is not ...:
-            kw['default'] = self.arg.default
+        if self.default is not ...:
+            kw['default'] = self.default
         parser.add_argument(self.dest, **kw)
 
 
@@ -146,8 +180,10 @@ class Option(CommandArg):
             'help': self.arg.help,
             'dest': self.dest,
         }
-        if self.arg.default is not ...:
-            kw['default'] = self.arg.default
+        if self.default is ...:
+            kw['required'] = True
+        else:
+            kw['default'] = self.default
         parser.add_argument(*self.all_names, **kw)
 
     def reserve_short_opts(self, reservations: MutableSet[str]):
@@ -169,13 +205,13 @@ class Flag(Option):
     def __init__(self, param: Parameter):
         super().__init__(param)
         if self.arg.default is ... or self.arg.default is None:
-            self.arg.default = False
-        elif not isinstance(self.arg.default, bool):
-            raise TypeError(self.arg.default)
+            self.default = False
+        elif not isinstance(self.default, bool):
+            raise TypeError(self.default)
 
     def add_to_parser(self, parser: argparse.ArgumentParser):
         kw = {
-            'action': f'store_{not self.arg.default}'.lower(),
+            'action': f'store_{not self.default}'.lower(),
             'help': self.arg.help,
             'dest': self.dest,
         }
@@ -186,14 +222,14 @@ class Flag(Option):
         if self.arg.long is not None:
             return self.arg.long
 
-        if self.arg.default:
-            return ['--' + self.dest.replace('_', '-')]
-        else:
+        if self.default:
             return ['--' + self.arg.negate_prefix + self.dest.replace('_', '-')]
+        else:
+            return ['--' + self.dest.replace('_', '-')]
 
     def auto_assign_short_opts(self, reservations: MutableSet[str]):
         proposed = self.dest[0]
-        if self.arg.default:
+        if self.default:
             proposed = proposed.upper()
         if proposed not in reservations:
             reservations.add(proposed)
@@ -234,3 +270,36 @@ class ArgGroup:
     def create_group(self, parser: argparse.ArgumentParser):
         return parser.add_argument_group(self.title, self.description)
 
+
+class ArgumentParserWrapper:
+    def __init__(self, parser, postprocessors: Dict[str, Callable[[Any], Any]]):
+        self._parser = parser
+        self._postprocessors = postprocessors
+
+    def _postprocess(self, namespace):
+        for attr, post in self._postprocessors.items():
+            setattr(namespace, attr, post(getattr(namespace, attr)))
+
+    def parse_args(self, args=None, namespace=None):
+        ns = self._parser.parse_args(args, namespace)
+        self._postprocess(ns)
+        return ns
+
+    def parse_known_args(self, args=None, namespace=None):
+        ns, unknown = self._parser.parse_known_args(args, namespace)
+        self._postprocess(ns)
+        return ns, unknown
+
+    def parse_intermixed_args(self, args=None, namespace=None):
+        ns = self._parser.parse_intermixed_args(args, namespace)
+        self._postprocess(ns)
+        return ns
+
+    def parse_known_intermixed_args(self, args=None, namespace=None):
+        ns, unknown = self._parser.parse_known_intermixed_args(args, namespace)
+        self._postprocess(ns)
+        return ns, unknown
+
+    # proxy remaining methods to _parser, unmodified
+    def __getattr__(self, attr):
+        return getattr(self._parser, attr)

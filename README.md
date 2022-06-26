@@ -7,7 +7,7 @@ Experimental python module for making command line parsers from function argumen
 my idea for this library is to be able to do something like this:
 
 ```python
-@autoarg.enrich
+@autoarg.command
 def some_command(a, b, c, ...):
     ...
 
