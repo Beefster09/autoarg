@@ -13,7 +13,7 @@ def some_command(a, b, c, ...):
 
 if __name__ == '__main__':
     some_command.main()
-    some_command.run(['some', 'arguments', '--go', '--here'])
+    some_command.run('some', 'arguments', '--go', '--here')
     args = some_command.parser.parse_args()
     some_command(1, 2, 3)  # you can still run it as a function
 ```

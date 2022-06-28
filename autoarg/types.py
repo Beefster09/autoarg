@@ -5,7 +5,7 @@ from typing import (
 
 __all__ = [
     'Append',
-    'Arg',
+    'Argument',
     'Count',
     'InFile',
     'InFileBin',
@@ -20,7 +20,7 @@ __all__ = [
 T = TypeVar('T')
 
 
-class Arg(Generic[T]):
+class Argument(Generic[T]):
     """Container for holding argparse metadata alongside a default value
 
     short:

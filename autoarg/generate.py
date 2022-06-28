@@ -3,7 +3,7 @@ from enum import Enum
 from inspect import signature, Parameter
 from typing import Any, Callable, Dict, List, Literal, Optional, Text, Tuple, Type, Union, MutableSet, get_origin
 
-from .types import Arg
+from .types import Argument
 
 
 def generate_argparser(
@@ -11,7 +11,7 @@ def generate_argparser(
     *,
     add_help=True,
     **parser_kw
-) -> argparse.ArgumentParser:
+):
     arg_groups, short_opts = _inspect_fn(func, add_help=add_help)
 
     parser = argparse.ArgumentParser(func.__name__, add_help=add_help, **parser_kw)
@@ -64,12 +64,12 @@ class CommandArg:
     def __init__(self, param: Parameter):
         self.fn_param = param
 
-        if isinstance(param.default, Arg):
+        if isinstance(param.default, Argument):
             self.arg = param.default
         elif param.default is Parameter.empty:
-            self.arg = Arg()
+            self.arg = Argument()
         else:
-            self.arg = Arg(param.default)
+            self.arg = Argument(param.default)
 
         if param.annotation is not Parameter.empty:
             self.type = param.annotation
@@ -123,7 +123,7 @@ class CommandArg:
     @property
     def choices(self) -> Optional[List[str]]:
         annotation = self.fn_param.annotation
-        if issubclass(annotation, Enum):
+        if isinstance(self.type, type) and issubclass(annotation, Enum):
             return [str(choice._value_) for choice in annotation]
 
 
@@ -195,10 +195,15 @@ class Option(CommandArg):
             self.short_opt = '-' + self.arg.short
 
     def auto_assign_short_opts(self, reservations: MutableSet[str]):
-        proposed = self.dest[0]
+        if self.short_opt is not None:
+            return
+        proposed = self.proposed_short_opt()
         if proposed not in reservations:
             reservations.add(proposed)
             self.short_opt = '-' + proposed
+
+    def proposed_short_opt(self):
+        return self.dest[0]
 
 
 class Flag(Option):
@@ -227,13 +232,11 @@ class Flag(Option):
         else:
             return ['--' + self.dest.replace('_', '-')]
 
-    def auto_assign_short_opts(self, reservations: MutableSet[str]):
+    def proposed_short_opt(self):
         proposed = self.dest[0]
         if self.default:
             proposed = proposed.upper()
-        if proposed not in reservations:
-            reservations.add(proposed)
-            self.short_opt = '-' + proposed
+        return proposed
 
 
 class FlagGroup(CommandArg):
@@ -277,8 +280,11 @@ class ArgumentParserWrapper:
         self._postprocessors = postprocessors
 
     def _postprocess(self, namespace):
-        for attr, post in self._postprocessors.items():
-            setattr(namespace, attr, post(getattr(namespace, attr)))
+        try:
+            for attr, post in self._postprocessors.items():
+                setattr(namespace, attr, post(getattr(namespace, attr)))
+        except ValueError as err:
+            self._parser.error(str(err))
 
     def parse_args(self, args=None, namespace=None):
         ns = self._parser.parse_args(args, namespace)
