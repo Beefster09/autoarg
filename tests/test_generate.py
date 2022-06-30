@@ -1,5 +1,8 @@
 import argparse
 from enum import Enum
+from typing import Literal
+
+import pytest
 
 from autoarg import generate_argparser
 
@@ -37,21 +40,53 @@ def test_enum():
 
     parser = generate_argparser(eat)
 
-    try:
+    with pytest.raises(SystemExit):
         parser.parse_args(['tomato'])
-    except SystemExit:
-        pass
-    else:
-        assert False
 
-    try:
+    with pytest.raises(SystemExit):
         parser.parse_args(['peach', '-s', 'potato'])
-    except SystemExit:
-        pass
-    else:
-        assert False
 
     args = parser.parse_args(['apple', '--side', 'peach', '-a', 'quickly'])
     assert args.fruit is Fruit.Apple
     assert args.side is Fruit.Peach
     assert args.adverb == 'quickly'
+
+
+def test_literal():
+    def something(
+        target: str,
+        amount: int,
+        *,
+        mode: Literal['fast', 'slow', 'balanced', 'default'] = 'default',
+    ):
+        pass
+
+    parser = generate_argparser(something)
+
+    args = parser.parse_args(['tires', '5'])
+    assert args.target == 'tires'
+    assert args.amount == 5
+    assert args.mode == 'default'
+
+    args = parser.parse_args(['clown', '8', '--default'])
+    assert args.target == 'clown'
+    assert args.amount == 8
+    assert args.mode == 'default'
+
+    args = parser.parse_args(['potato', '13', '--fast'])
+    assert args.target == 'potato'
+    assert args.amount == 13
+    assert args.mode == 'fast'
+
+    args = parser.parse_args(['house', '4', '--slow'])
+    assert args.target == 'house'
+    assert args.amount == 4
+    assert args.mode == 'slow'
+
+    args = parser.parse_args(['sword', '0', '--balanced'])
+    assert args.target == 'sword'
+    assert args.amount == 0
+    assert args.mode == 'balanced'
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(['beach', '6', '--fast', '--slow'])

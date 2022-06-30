@@ -1,9 +1,23 @@
 import argparse
 from enum import Enum
-from inspect import signature, Parameter
-from typing import Any, Callable, Dict, List, Literal, Optional, Text, Tuple, Type, Union, MutableSet, get_origin
+from inspect import Parameter, signature
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    MutableSet,
+    Optional,
+    Text,
+    Tuple,
+    Type,
+    Union,
+    get_args,
+    get_origin,
+)
 
-from .types import Argument
+from .types import Argument, Count
 
 
 def generate_argparser(
@@ -61,7 +75,7 @@ def _inspect_fn(func: Callable, /, *, add_help=True):
 
 
 class CommandArg:
-    def __init__(self, param: Parameter):
+    def __init__(self, param: Parameter, **kwargs):
         self.fn_param = param
 
         if isinstance(param.default, Argument):
@@ -71,7 +85,9 @@ class CommandArg:
         else:
             self.arg = Argument(param.default)
 
-        if param.annotation is not Parameter.empty:
+        if 'type' in kwargs:
+            self.type = kwargs['type']
+        elif param.annotation is not Parameter.empty:
             self.type = param.annotation
         elif self.arg.default is not ...:
             self.type = type(self.arg.default)
@@ -96,16 +112,19 @@ class CommandArg:
 
         if self.type is ... or self.type is str:
             return None
-        elif isinstance(self.type, type) and issubclass(self.type, Enum):
+
+        if isinstance(self.type, type) and issubclass(self.type, Enum):
             first_base = self.type.__mro__[1]
             if not issubclass(first_base, (str, Enum)):
                 return first_base
             else:
                 return None
-        elif get_origin(self.type) is tuple:
+
+        if get_origin(self.type) is tuple:
             # TODO
             raise NotImplementedError()
-        elif callable(self.type):
+
+        if callable(self.type):
             # probably should also check that it can be called with a single string argument
             return self.type
 
@@ -174,11 +193,11 @@ class Option(CommandArg):
 
     def add_to_parser(self, parser: argparse.ArgumentParser):
         kw = {
+            'dest': self.dest,
             'choices': self.choices,
             'type': self.factory,
             'metavar': self.arg.metavar,
             'help': self.arg.help,
-            'dest': self.dest,
         }
         if self.default is ...:
             kw['required'] = True
@@ -216,9 +235,9 @@ class Flag(Option):
 
     def add_to_parser(self, parser: argparse.ArgumentParser):
         kw = {
+            'dest': self.dest,
             'action': f'store_{not self.default}'.lower(),
             'help': self.arg.help,
-            'dest': self.dest,
         }
         parser.add_argument(*self.all_names, **kw)
 
@@ -239,20 +258,61 @@ class Flag(Option):
         return proposed
 
 
+class CountFlag(Option):
+    def add_to_parser(self, parser: argparse.ArgumentParser):
+        kw = {
+            'dest': self.dest,
+            'action': 'count',
+            'help': self.arg.help,
+        }
+        parser.add_argument(*self.all_names, **kw)
+
+
 class FlagGroup(CommandArg):
-    def __init__(self, param: Parameter):
-        ...
+    def __init__(self, param: Parameter, flag_values: Tuple[str]):
+        for val in flag_values:
+            if not isinstance(val, str):
+                raise TypeError(f"Literal flag values must be strings, got {val}")
+        super().__init__(param, type=str)
+        self.flag_values = flag_values
+        self.short_opts = {}
+
+    def add_to_parser(self, parser: argparse.ArgumentParser):
+        mutex_group = parser.add_mutually_exclusive_group(required=self.default is ...)
+        for flag in self.flag_values:
+            kw = {
+                'dest': self.dest,
+                'action': 'store_const',
+                'const': flag,
+                'help': self.arg.help,
+            }
+            flags = [f"--{flag.replace('_', '-')}"]
+            short = self.short_opts[flag]
+            if short:
+                flags.insert(0, '-' + short)
+            mutex_group.add_argument(*flags, **kw)
+
+        if self.default is not ...:
+            parser.set_defaults(**{self.dest: self.default})
 
     def reserve_short_opts(self, reservations: MutableSet[str]):
         ...
 
     def auto_assign_short_opts(self, reservations: MutableSet[str]):
-        ...
+        for flag in self.flag_values:
+            if flag in self.short_opts:
+                continue
+            proposed = flag[0]
+            if proposed not in reservations:
+                reservations.add(proposed)
+                self.short_opts[flag] = '-' + proposed
 
 
 def _inspect_opt(param: Parameter):
-    if get_origin(param.annotation) is Literal:
-        return FlagGroup(param)
+    if param.annotation is Count:
+        return CountFlag(param)
+    elif get_origin(param.annotation) is Literal:
+        return FlagGroup(param, get_args(param.annotation))
     # TODO: Append/Set[Literal[...]]
     elif param.annotation is bool or isinstance(param.default, bool):
         return Flag(param)

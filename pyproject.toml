@@ -4,16 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autoarg"
+version = "0.1.0"
 authors = [
     { name="Justin Snyder", email="ifoundthebeef@gmail.com" }
 ]
 description = "Experimental python module for making command line parsers from function argument annotations"
 readme = "README.md"
 requires-python = ">=3.8"
+license = { file="LICENSE" }
+keywords = [
+    "argparse",
+    "command-line",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+]
+dependencies = [
+    "docstring-parser>=0.14",
+    "typing-extensions>=4.2",
 ]
 
 [project.urls]
@@ -22,7 +32,15 @@ classifiers = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q"
+addopts = "-ra"
 testpaths = [
     "tests",
 ]
+pythonpath = [
+    ".",
+]
+
+[tool.isort]
+include_trailing_comma = true
+multi_line_output = 3
+line_length = 99

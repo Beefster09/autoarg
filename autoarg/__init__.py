@@ -1,5 +1,5 @@
 import functools
-from typing import TypeVar, cast
+from typing import Any, TypeVar, cast, overload, Optional, Callable, List
 
 from .decorators import command
 from .generate import generate_argparser
@@ -24,9 +24,39 @@ __all__ = [
 ]
 
 
+# overloads for type checkers
+
+
 T = TypeVar('T')
 
 
+@overload
+def Arg(
+    *,
+    short: Optional[str] = ...,
+    long: Optional[List[str]] = None,
+    negate_prefix: str = 'no-',
+    factory: Optional[Callable[[str], T]] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+) -> Any:
+    ...
+
+
+@overload
+def Arg(
+    value: T,
+    /, *,
+    short: Optional[str] = ...,
+    long: Optional[List[str]] = None,
+    negate_prefix: str = 'no-',
+    factory: Optional[Callable[[str], T]] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+) -> T:
+    ...
+
+
 @functools.wraps(Argument)
-def Arg(value: T = ..., /, **kwargs) -> T:
-    return cast(T, Argument(value, **kwargs))
+def Arg(value=..., **kwargs):
+    return cast(Any, Argument(value, **kwargs))
