@@ -1,23 +1,11 @@
 import argparse
 from enum import Enum
 from inspect import Parameter, signature
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    MutableSet,
-    Optional,
-    Text,
-    Tuple,
-    Type,
-    Union,
-    get_args,
-    get_origin,
-)
+from typing import Any, Callable, Dict, List, MutableSet, Optional, Tuple, Union, IO
 
-from .types import Argument, Count
+from typing_extensions import Annotated, Literal, Text, Type, TypeGuard, get_args, get_origin
+
+from .types import Argument, Count, Remainder
 
 
 def generate_argparser(
@@ -99,6 +87,7 @@ class CommandArg:
         else:
             self.default = self.arg.default
 
+        self.nargs = None
         self.factory = self._infer_factory()
         self.postprocessor = self._infer_postprocessor()
 
@@ -110,10 +99,17 @@ class CommandArg:
         if self.arg.factory:
             return self.arg.factory
 
-        if self.type is ... or self.type is str:
+        if self.type in [..., str, Count, Remainder]:
             return None
 
-        if isinstance(self.type, type) and issubclass(self.type, Enum):
+        if get_origin(self.type) is Annotated:
+            T, *rest = get_args(self.type)
+            if T is IO:
+                return argparse.FileType(*rest)
+            if is_simple_factory(T):  # TODO: incomplete
+                return T
+
+        if is_enum_class(self.type):
             first_base = self.type.__mro__[1]
             if not issubclass(first_base, (str, Enum)):
                 return first_base
@@ -121,29 +117,37 @@ class CommandArg:
                 return None
 
         if get_origin(self.type) is tuple:
-            # TODO
-            raise NotImplementedError()
+            targs = get_args(self.type)
+            for T in targs:
+                if not is_simple_factory(T):
+                    raise TypeError(f"parameter {self.dest}: Tuple type {T} (in {self.type}) is not a valid factory")
+            self.nargs = len(targs)
+            return None  # should be parsed by postprocessor
 
-        if callable(self.type):
-            # probably should also check that it can be called with a single string argument
+        if is_simple_factory(self.type):
             return self.type
 
-        raise TypeError(self.type)
+        raise TypeError(f"parameter {self.dest}: could not determine suitable factory for {self.type}")
 
     def _infer_postprocessor(self) -> Optional[Callable[[Any], Any]]:
         if self.arg.factory:
             return None
 
-        if isinstance(self.type, type) and issubclass(self.type, Enum):
+        if is_enum_class(self.type):
             return self.type
-        else:
-            return None
+
+        if get_origin(self.type) is tuple:
+            return lambda values, types=get_args(self.type): tuple(
+                T(x) for x, T in zip(values, types)
+            )
+
+        return None
 
     @property
     def choices(self) -> Optional[List[str]]:
-        annotation = self.fn_param.annotation
-        if isinstance(self.type, type) and issubclass(annotation, Enum):
-            return [str(choice._value_) for choice in annotation]
+        if is_enum_class(self.type):
+            return [str(choice._value_) for choice in self.type]
+        return None
 
 
 class Positional(CommandArg):
@@ -154,8 +158,13 @@ class Positional(CommandArg):
             'metavar': self.arg.metavar,
             'help': self.arg.help,
         }
+
         if self.default is not ...:
             kw['default'] = self.default
+
+        if self.nargs is not None:
+            kw['nargs'] = self.nargs
+
         parser.add_argument(self.dest, **kw)
 
 
@@ -168,8 +177,10 @@ class VarPositional(Positional):
             'metavar': self.arg.metavar,
             'help': self.arg.help,
         }
+
         if self.default is not ...:
             kw['default'] = self.default
+
         parser.add_argument(self.dest, **kw)
 
 
@@ -199,10 +210,15 @@ class Option(CommandArg):
             'metavar': self.arg.metavar,
             'help': self.arg.help,
         }
+
         if self.default is ...:
             kw['required'] = True
         else:
             kw['default'] = self.default
+
+        if self.nargs is not None:
+            kw['nargs'] = self.nargs
+
         parser.add_argument(*self.all_names, **kw)
 
     def reserve_short_opts(self, reservations: MutableSet[str]):
@@ -313,7 +329,7 @@ def _inspect_opt(param: Parameter):
         return CountFlag(param)
     elif get_origin(param.annotation) is Literal:
         return FlagGroup(param, get_args(param.annotation))
-    # TODO: Append/Set[Literal[...]]
+    # TODO: Append/Set[T]
     elif param.annotation is bool or isinstance(param.default, bool):
         return Flag(param)
     else:
@@ -369,3 +385,13 @@ class ArgumentParserWrapper:
     # proxy remaining methods to _parser, unmodified
     def __getattr__(self, attr):
         return getattr(self._parser, attr)
+
+
+def is_enum_class(val) -> TypeGuard[Type[Enum]]:
+    return isinstance(val, type) and issubclass(val, Enum)
+
+
+def is_simple_factory(val) -> TypeGuard[Callable[[str], Any]]:
+    return callable(val) and isinstance(val, type)
+    # this logic is flawed, but it *does* correctly reject generic annotations
+    # TODO: check the signature of the type

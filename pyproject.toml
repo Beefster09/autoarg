@@ -8,13 +8,14 @@ version = "0.1.0"
 authors = [
     { name="Justin Snyder", email="ifoundthebeef@gmail.com" }
 ]
-description = "Experimental python module for making command line parsers from function argument annotations"
+description = "Create commandline tools without all the boilerplate and redundancy"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { file="LICENSE" }
 keywords = [
     "argparse",
     "command-line",
+    "cli",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

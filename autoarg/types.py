@@ -1,18 +1,26 @@
 from typing import (
-    IO, Any, BinaryIO, Callable, Generic, List, Literal, NewType, Optional,
-    TextIO, Tuple, TypeVar, Union
+    IO,
+    Any,
+    BinaryIO,
+    Callable,
+    Generic,
+    List,
+    Optional,
+    TextIO,
+    Tuple,
+    TypeVar,
+    Union,
 )
+
+from typing_extensions import Annotated, Literal, NewType, Type
 
 __all__ = [
     'Append',
     'Argument',
     'Count',
-    'InFile',
-    'InFileBin',
+    'File',
     'JSON',
     'OneOrMore',
-    'OutFile',
-    'OutFileBin',
     'Remainder',
 ]
 
@@ -63,12 +71,6 @@ class Argument(Generic[T]):
         self.help = help
         self.metavar = metavar
 
-    def _apply_to(self, kw):
-        pass
-
-    def argparse_kwargs(self, is_opt=False):
-        ...
-
     @property
     def is_flag(self):
         return isinstance(self.default, bool)
@@ -78,21 +80,24 @@ class Argument(Generic[T]):
         return self.default is ...
 
 
-# Special annotation-only types
+# Annotated types for special cases
 
 
-class OneOrMore(Generic[T]):
-    pass
+class OneOrMore:
+    def __class_getitem__(cls, T):
+        return Annotated[T, '+']
 
 
-class Append(List[T]):
-    pass
+class Append:
+    def __class_getitem__(cls, T):
+        return Annotated[List[T], 'append']
 
 
-Count = NewType("Count", int)
-Remainder = NewType("Remainder", List[str])
-InFile = NewType("InFile", TextIO)
-OutFile = NewType("OutFile", TextIO)
-InFileBin = NewType("InFileBin", BinaryIO)
-OutFileBin = NewType("OutFileBin", BinaryIO)
-JSON = NewType("JSON", Any)
+class File:
+    def __class_getitem__(cls, mode: str):
+        return Annotated[IO, mode]
+
+
+Count = Annotated[int, 'count']
+Remainder = Annotated[List[str], 'remainder']
+JSON = Annotated[Any, 'json']

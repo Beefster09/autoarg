@@ -4,7 +4,7 @@ from autoarg import *
 @command
 def grep(
     pattern: str,
-    *files: InFile,
+    *files: File['r'],
     verbose: Count = Arg(short='v', long=[], help="increase output verbosity (can be specified multiple times)"),
     quiet: Count = Arg(short='q', long=[], help="decrease output verbosity (can be specified multiple times)"),
 

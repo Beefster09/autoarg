@@ -1,6 +1,8 @@
 import argparse
 from enum import Enum
-from typing import Literal
+from typing import List, Tuple
+
+from typing_extensions import Literal
 
 import pytest
 
@@ -90,3 +92,21 @@ def test_literal():
 
     with pytest.raises(SystemExit):
         parser.parse_args(['beach', '6', '--fast', '--slow'])
+
+
+def test_tuple():
+    def good(a: Tuple[float, int, str]):
+        pass
+
+    parser = generate_argparser(good)
+
+    args = parser.parse_args(['3.14', '42', 'best numbers'])
+    assert args.a == (3.14, 42, 'best numbers')
+
+
+def test_tuple_errors():
+    def bad(a: Tuple[List[int], int, str]):
+        pass
+
+    with pytest.raises(TypeError):
+        generate_argparser(bad)

@@ -1,23 +1,17 @@
 import functools
-from typing import Any, TypeVar, cast, overload, Optional, Callable, List
+from typing import Any, Callable, List, Optional, TypeVar, cast, overload
 
 from .decorators import command
 from .generate import generate_argparser
-from .types import (
-    Append, Argument, Count, InFile, InFileBin, JSON, OneOrMore,
-    OutFile, OutFileBin, Remainder,
-)
+from .types import JSON, Append, Argument, Count, File, OneOrMore, Remainder
 
 __all__ = [
     'Append',
     'Arg',
     'Count',
-    'InFile',
-    'InFileBin',
+    'File',
     'JSON',
     'OneOrMore',
-    'OutFile',
-    'OutFileBin',
     'Remainder',
     'command',
     'generate_argparser'

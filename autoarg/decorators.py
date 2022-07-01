@@ -1,14 +1,13 @@
 import functools
 import sys
-from typing import NoReturn, Callable, Tuple, no_type_check_decorator
 from inspect import signature, Parameter
+from typing import NoReturn, Callable, Tuple
 
 from .generate import generate_argparser
 from .types import Argument
 
 
 def command(maybe_fn=None, /, **opts):
-    @no_type_check_decorator
     def _decorator(fn):
         parser = generate_argparser(fn)
         _sanitize_defaults(fn)
