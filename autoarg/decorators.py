@@ -4,7 +4,7 @@ from inspect import signature, Parameter
 from typing import NoReturn, Callable, Tuple
 
 from .generate import generate_argparser
-from .types import Argument
+from .types import _AnnotatedValue, _sensible_default_value
 
 
 def command(maybe_fn=None, /, **opts):
@@ -68,16 +68,17 @@ class Command:
 
 
 def _sanitize_defaults(fn):
-    """Strips out `Argument`s and headers from the function's defaults
+    """Strips out `Arg`s and headers from the function's defaults
     """
+    sig = signature(fn)
     # TODO: handle ... properly for obvious default values, e.g. Count, bool
     if fn.__defaults__ is not None:
         fn.__defaults__ = tuple(
-            value.default if isinstance(value, Argument) else value
+            value.value if isinstance(value, _AnnotatedValue) else value
             for value in fn.__defaults__
         )
     if fn.__kwdefaults__ is not None:
         fn.__kwdefaults__ = {
-            name: value.default if isinstance(value, Argument) else value
+            name: value.value if isinstance(value, _AnnotatedValue) else value
             for name, value in fn.__kwdefaults__.items()
         }

@@ -1,22 +1,25 @@
+from enum import Enum
 from typing import (
     IO,
     Any,
-    BinaryIO,
     Callable,
+    Dict,
     Generic,
     List,
     Optional,
-    TextIO,
     Tuple,
+    Type,
     TypeVar,
     Union,
+    cast,
+    overload,
 )
 
-from typing_extensions import Annotated, Literal, NewType, Type
+from typing_extensions import Annotated, Literal, get_args, get_origin
 
 __all__ = [
     'Append',
-    'Argument',
+    'Arg',
     'Count',
     'File',
     'JSON',
@@ -26,58 +29,8 @@ __all__ = [
 
 
 T = TypeVar('T')
-
-
-class Argument(Generic[T]):
-    """Container for holding argparse metadata alongside a default value
-
-    short:
-        * ... -> automatically assign short option if possible
-            (based on first letter of name, earlier arguments prioritized)
-        * 'a' -> reserves that short opt even if another argument would
-            have been automatically assigned that opt otherwise.
-        * None -> do not create short option
-    long: provide list of long options to use instead of parameter name
-    negate_prefix:
-        if `long` was not specified and the default value is True, a
-        prefix to the name of the long argument
-    factory: overrides `type` argument that would have been generated
-        from the annotated type
-    help: the help string
-    metavar: the metavar in the generated help
-    """
-
-    def __init__(
-        self,
-        value: T = ...,
-        /, *,
-        short: Optional[str] = ...,
-        long: Optional[List[str]] = None,
-        negate_prefix: str = 'no-',
-        factory: Optional[Callable[[str], T]] = None,
-        help: Optional[str] = None,
-        metavar: Optional[str] = None,
-    ):
-        self.default = value
-        if isinstance(short, str):
-            if short[0] == '-':
-                short = short[1:]
-            if len(short) != 1:
-                raise TypeError(f"invalid short option: {short}")
-        self.short = short
-        self.long = long
-        self.negate_prefix = negate_prefix
-        self.factory = factory
-        self.help = help
-        self.metavar = metavar
-
-    @property
-    def is_flag(self):
-        return isinstance(self.default, bool)
-
-    @property
-    def is_required(self):
-        return self.default is ...
+T_Literal = TypeVar('T_Literal', bound=Literal['dummy'])
+T_Enum = TypeVar('T_Enum', bound=Enum)
 
 
 # Annotated types for special cases
@@ -99,5 +52,141 @@ class File:
 
 
 Count = Annotated[int, 'count']
+Level = Annotated[int, 'level']  # creates 2 count arguments: one for up, one for down
+Verbosity = Annotated[int, 'level', 'verbosity']  # same as level, but with sensible defaults
 Remainder = Annotated[List[str], 'remainder']
 JSON = Annotated[Any, 'json']
+
+
+def _sensible_default_value(typ: Type) -> Any:
+    if typ is bool:
+        return False
+
+    if get_origin(typ) is Annotated:
+        T, *annotations = get_args(typ)
+        if T is int:
+            if 'count' in annotations or 'level' in annotations:
+                return 0
+        if get_origin(T) is list:
+            if 'remainder' in annotations or 'append' in annotations:
+                return []
+
+    return ...
+
+
+class _AnnotatedValue:
+    """Internal container for holding data alongside default values
+    """
+    def __init__(
+        self,
+        value: Any = ...,
+        /,
+        **annotations
+    ):
+        self.value = value
+        self._annotations = annotations
+
+    def get(self, key, default=None):
+        return self._annotations.get(key, default)
+
+    def __getitem__(self, key):
+        return self._annotations[key]
+
+    def __contains__(self, key):
+        return key in self._annotations
+
+
+# A utility public wrapper for _AnnotatedValue
+# with some sensible overloads for various special types
+# mostly for documentation - it probably won't make sense to type checkers
+
+
+@overload
+def Arg(
+    *,
+    short: Optional[str] = None,
+    long: Optional[List[str]] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+) -> Count:
+    ...
+
+
+@overload
+def Arg(
+    default: int = 0,
+    /, *,
+    up_short: Optional[str] = None,
+    up_long: Optional[List[str]] = None,
+    down_short: Optional[str] = None,
+    down_long: Optional[List[str]] = None,
+    min: Optional[int] = None,
+    max: Optional[int] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+) -> Level:
+    ...
+
+
+@overload
+def Arg(
+    default: bool = False,
+    /, *,
+    short: Optional[str] = None,
+    long: Optional[List[str]] = None,
+    help: Optional[str] = None,
+) -> bool:
+    ...
+
+
+@overload
+def Arg(
+    default: bool = False,
+    /, *,
+    short: Optional[str] = None,
+    negate_prefix: str,
+    help: Optional[str] = None,
+) -> bool:
+    ...
+
+
+@overload
+def Arg(
+    default: Optional[T_Literal] = None,
+    /, *,
+    shorts: Dict[T_Literal, str] = {},
+    longs: Dict[T_Literal, List[str]] = {},
+    help: Optional[str] = None,
+) -> T_Literal:
+    ...
+
+
+@overload
+def Arg(
+    default: Optional[T_Enum] = None,
+    /, *,
+    short: Optional[str] = None,
+    long: Optional[List[str]] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+) -> T_Enum:
+    ...
+
+
+@overload
+def Arg(
+    default: Optional[T] = None,
+    /, *,
+    short: Optional[str] = None,
+    long: Optional[List[str]] = None,
+    factory: Optional[Callable[[str], T]] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+) -> T:
+    ...
+
+
+def Arg(default: Any = ..., /, **annotations):
+    if not annotations:
+        raise TypeError("at least one keyword argument must be provided to Arg()")
+    return cast(Any, _AnnotatedValue(default, **annotations))
